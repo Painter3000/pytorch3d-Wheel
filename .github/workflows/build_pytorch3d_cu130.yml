@@ -148,7 +148,7 @@ jobs:
             | torch | 2.11.0+cu130 |
             | torchvision | 0.26.0+cu130 |
             | CUDA | 13.0 |
-            | GPU-Architekturen | 7.0 / 7.5 / 8.0 / 8.6 / 9.0 / **12.0 (Blackwell)** |
+            | GPU-Architekturen | **12.0 (Blackwell / ONLY)** |
             | pytorch3d ref | `${{ github.event.inputs.pytorch3d_ref || 'main' }}` |
 
             ### Verwendung in requirements.txt
