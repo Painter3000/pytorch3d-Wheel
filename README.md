@@ -11,7 +11,7 @@ Optimiert für **HuggingFace ZeroGPU** und **PSHuman** auf Blackwell Hardware.
 | **Python** | 3.10 |
 | **PyTorch** | 2.11.0 + cu128 |
 | **CUDA** | 12.8 |
-| **GPU Arch** | 7.0, 7.5, 8.0, 8.6, 9.0, **12.0 (Blackwell)** |
+| **GPU Arch** | **12.0 (Blackwell / ONLY)** |
 | **PyTorch3D** | main (konfigurierbar) |
 
 ## 🚀 Workflow
