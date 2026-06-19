@@ -19,7 +19,7 @@ jobs:
 
     # CUDA 13.0 Developer Image – enthält nvcc, cublas, cudnn-headers etc.
     container:
-      image: nvidia/cuda:12.9.0-devel-ubuntu22.04
+      image: nvidia/cuda:13.0.1-devel-ubuntu22.04
 
     env:
       DEBIAN_FRONTEND: noninteractive
