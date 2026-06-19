@@ -1,0 +1,167 @@
+name: Build pytorch3d Wheel (torch 2.11.0 + CUDA 13.0 + Blackwell)
+
+# Manuell auslösen – optionaler Input für pytorch3d-Ref (Branch, Tag oder Commit)
+on:
+  workflow_dispatch:
+    inputs:
+      pytorch3d_ref:
+        description: "pytorch3d branch / tag / commit (default: main)"
+        required: false
+        default: "main"
+
+# Schreibrechte für das Erstellen von Releases
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    # CUDA 13.0 Developer Image – enthält nvcc, cublas, cudnn-headers etc.
+    container:
+      image: nvidia/cuda:12.9.0-devel-ubuntu22.04
+
+    env:
+      DEBIAN_FRONTEND: noninteractive
+      # FORCE_CUDA: CUDA-Kompilierung erzwingen, auch ohne physische GPU
+      FORCE_CUDA: "1"
+      # Nur Blackwell sm_120 – kein Multi-Arch, spart RAM und Zeit
+      TORCH_CUDA_ARCH_LIST: "12.0"
+      # Parallele Build-Jobs – 4 ist ein sicherer Wert für GitHub-Runner (7 GB RAM)
+      MAX_JOBS: "4"
+
+    steps:
+      # ------------------------------------------------------------------
+      # 1. System-Pakete
+      # ------------------------------------------------------------------
+      - name: Install system packages
+        run: |
+          apt-get update -y
+          apt-get install -y \
+            python3.10 \
+            python3.10-dev \
+            python3-pip \
+            python3-distutils \
+            git \
+            build-essential \
+            ninja-build \
+            libgl1-mesa-glx \
+            libglib2.0-0
+          # Python 3.10 als Standard setzen
+          update-alternatives --install /usr/bin/python3 python3 /usr/bin/python3.10 1
+          update-alternatives --install /usr/bin/python  python  /usr/bin/python3.10 1
+          echo "--- Python version ---"
+          python --version
+          echo "--- NVCC version ---"
+          nvcc --version
+
+      # ------------------------------------------------------------------
+      # 2. pip / setuptools / wheel aktualisieren
+      # ------------------------------------------------------------------
+      - name: Upgrade pip and build tools
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+
+      # ------------------------------------------------------------------
+      # 3. PyTorch 2.11.0 + CUDA 13.0
+      # WICHTIG: --index-url, nicht --extra-index-url, damit kein CPU-Wheel
+      #           zufällig bevorzugt wird.
+      # ------------------------------------------------------------------
+      - name: Install PyTorch 2.11.0 + cu130
+        run: |
+          python -m pip install \
+            torch==2.11.0 \
+            torchvision==0.26.0 \
+            --index-url https://download.pytorch.org/whl/cu130
+          echo "--- Verify torch ---"
+          python -c "
+          import torch
+          print('torch version :', torch.__version__)
+          print('CUDA build    :', torch.version.cuda)
+          print('torch path    :', torch.__file__)
+          "
+
+      # ------------------------------------------------------------------
+      # 4. pytorch3d Build-Abhängigkeiten
+      # fvcore und iopath werden von pytorch3d direkt gebraucht
+      # ------------------------------------------------------------------
+      - name: Install pytorch3d build dependencies
+        run: |
+          python -m pip install fvcore iopath
+
+      # ------------------------------------------------------------------
+      # 5. pytorch3d klonen
+      # Vollständiger Clone (kein --depth 1), damit git checkout
+      # auch für Tags und Commits funktioniert.
+      # ------------------------------------------------------------------
+      - name: Clone pytorch3d
+        run: |
+          REF="${{ github.event.inputs.pytorch3d_ref }}"
+          REF="${REF:-main}"
+          echo "Cloning pytorch3d @ ref: $REF"
+          git clone https://github.com/facebookresearch/pytorch3d.git
+          cd pytorch3d
+          git checkout "$REF"
+          echo "--- HEAD ---"
+          git log --oneline -1
+
+      # ------------------------------------------------------------------
+      # 6. Wheel bauen
+      # --no-build-isolation: vorhandenes torch 2.11.0 verwenden,
+      # kein automatisches torch-Downgrade durch pip's Isolation.
+      # ------------------------------------------------------------------
+      - name: Build pytorch3d wheel
+        run: |
+          mkdir -p /tmp/wheels
+          cd pytorch3d
+          python -m pip wheel . \
+            --no-build-isolation \
+            -w /tmp/wheels/
+          echo "--- Built files ---"
+          ls -lh /tmp/wheels/
+
+      # ------------------------------------------------------------------
+      # 7. Wheel als Artifact hochladen (30 Tage Aufbewahrung)
+      # ------------------------------------------------------------------
+      - name: Upload wheel artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pytorch3d-torch2.11.0-cu130-sm120
+          path: /tmp/wheels/*.whl
+          retention-days: 30
+
+      # ------------------------------------------------------------------
+      # 8. GitHub Release erstellen und Wheel anhängen
+      # Nach dem Release ist das Wheel per direkter URL einbindbar.
+      # ------------------------------------------------------------------
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: pytorch3d-torch2.11.0-cu130
+          name: "pytorch3d – torch 2.11.0 + CUDA 13.0 + Blackwell (sm_120)"
+          body: |
+            ## Custom pytorch3d Wheel für PSHuman / HF ZeroGPU Blackwell
+
+            | Komponente | Version |
+            |---|---|
+            | Python | 3.10 |
+            | torch | 2.11.0+cu130 |
+            | torchvision | 0.26.0+cu130 |
+            | CUDA | 13.0 |
+            | GPU-Architekturen | 7.0 / 7.5 / 8.0 / 8.6 / 9.0 / **12.0 (Blackwell)** |
+            | pytorch3d ref | `${{ github.event.inputs.pytorch3d_ref || 'main' }}` |
+
+            ### Verwendung in requirements.txt
+
+            ```
+            https://github.com/YOUR_USER/YOUR_REPO/releases/download/pytorch3d-torch2.11.0-cu130/WHEEL_FILENAME.whl
+            ```
+
+            ### Hinweise
+            - Wheel mit `--no-build-isolation` gebaut → nutzt exakt torch 2.11.0
+            - Kein `--no-deps` nötig (pytorch3d zieht kein eigenes torch nach)
+            - Bei ZeroGPU: nur den GPU-Inferenzpfad mit pytorch3d belasten,
+              CPU-Postprocessing (Mesh, OBJ-Export) separat halten
+          files: /tmp/wheels/*.whl
+          draft: false
+          prerelease: false
